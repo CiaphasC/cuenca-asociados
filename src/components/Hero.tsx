@@ -1,204 +1,257 @@
-
-import { useState, useEffect } from 'react';
+import React, { FC, useState, useMemo, useCallback, useEffect, useRef } from 'react';
 import { ChevronLeft, ChevronRight } from 'lucide-react';
 import { servicesData } from '@/data/services';
+import { useIsMobile } from '@/hooks/use-mobile';
+import { Link } from 'react-router-dom';
 
-// Create slides from the top services
-const slides = [
-  {
-    id: 1,
-    title: 'Soluciones Financieras',
-    subtitle: 'Confiables & Profesionales',
-    description: 'Expertos en auditoría financiera, contable y tributaria con más de 20 años de experiencia.',
-    image: 'https://images.unsplash.com/photo-1454165804606-c3d57bc86b40?ixlib=rb-4.0.3&ixid=M3wxMjA3fDB8MHxwaG90by1wYWdlfHx8fGVufDB8fHx8fA%3D%3D&auto=format&fit=crop&w=2070&q=80',
-    serviceId: 'auditoria-financiera'
-  },
-  {
-    id: 2,
-    title: 'Asesoría Tributaria',
-    subtitle: 'Optimiza tus Obligaciones',
-    description: 'Cumplimiento eficiente de declaraciones, reclamaciones y solicitudes ante SUNAT.',
-    image: 'https://images.unsplash.com/photo-1554224155-6726b3ff858f?ixlib=rb-4.0.3&ixid=M3wxMjA3fDB8MHxwaG90by1wYWdlfHx8fGVufDB8fHx8fA%3D%3D&auto=format&fit=crop&w=2011&q=80',
-    serviceId: 'tributario'
-  },
-  {
-    id: 3,
-    title: 'Reestructuración Empresarial',
-    subtitle: 'Mejora tu Organización',
-    description: 'Reorganización de obligaciones y determinación de viabilidad comercial y operacional.',
-    image: 'https://images.unsplash.com/photo-1507679799987-c73779587ccf?ixlib=rb-4.0.3&ixid=M3wxMjA3fDB8MHxwaG90by1wYWdlfHx8fGVufDB8fHx8fA%3D%3D&auto=format&fit=crop&w=2071&q=80',
-    serviceId: 'reestructuracion'
-  },
-];
+/* ================= Tipos e Interfaces ================= */
+interface SlideData {
+  id: string;
+  title: string;
+  subtitle: string;
+  description: string;
+  image: string;
+  serviceId: string;
+}
 
-// Add other key services from servicesData
-servicesData.forEach(service => {
-  if (!slides.some(slide => slide.serviceId === service.id) && slides.length < 6) {
-    slides.push({
-      id: slides.length + 1,
-      title: service.title,
-      subtitle: 'Servicios Especializados',
-      description: service.description,
-      image: service.image,
-      serviceId: service.id
-    });
-  }
-});
+interface SlideProps {
+  slide: SlideData;
+  isActive: boolean;
+  isMobile: boolean;
+}
 
-const Hero = () => {
-  const [currentSlide, setCurrentSlide] = useState(0);
-  const [isLoading, setIsLoading] = useState(true);
-  const [touchStart, setTouchStart] = useState(0);
-  const [touchEnd, setTouchEnd] = useState(0);
-  
+interface SliderControlsProps {
+  slides: SlideData[];
+  currentSlide: number;
+  setCurrentSlide: React.Dispatch<React.SetStateAction<number>>;
+  prevSlide: () => void;
+  nextSlide: () => void;
+}
+
+/* ================= Custom Hooks ================= */
+
+// Hook para precargar imágenes
+function useImagePreloader(images: string[]): boolean {
+  const [loaded, setLoaded] = useState<boolean>(false);
+
   useEffect(() => {
-    const preloadImages = async () => {
-      const promises = slides.map((slide) => {
-        return new Promise((resolve) => {
+    let isCancelled = false;
+    Promise.all(
+      images.map(src =>
+        new Promise<void>((resolve) => {
           const img = new Image();
-          img.src = slide.image;
-          img.onload = resolve;
-        });
-      });
-      
-      await Promise.all(promises);
-      setIsLoading(false);
-    };
-    
-    preloadImages();
-    
-    const interval = setInterval(() => {
-      nextSlide();
-    }, 6000);
-    
-    return () => clearInterval(interval);
-  }, []);
-  
-  const prevSlide = () => {
-    setCurrentSlide((prev) => (prev === 0 ? slides.length - 1 : prev - 1));
-  };
-  
-  const nextSlide = () => {
-    setCurrentSlide((prev) => (prev === slides.length - 1 ? 0 : prev + 1));
-  };
-  
-  const handleTouchStart = (e: React.TouchEvent) => {
+          img.src = src;
+          img.onload = () => resolve();
+          img.onerror = () => resolve();
+        })
+      )
+    ).then(() => {
+      if (!isCancelled) setLoaded(true);
+    });
+    return () => { isCancelled = true; };
+  }, [images]);
+
+  return loaded;
+}
+
+// Hook para manejar intervalos de forma declarativa
+function useInterval(callback: () => void, delay: number | null): void {
+  const savedCallback = useRef<() => void>(callback);
+
+  useEffect(() => { savedCallback.current = callback; }, [callback]);
+
+  useEffect(() => {
+    if (delay !== null) {
+      const id = setInterval(() => savedCallback.current(), delay);
+      return () => clearInterval(id);
+    }
+  }, [delay]);
+}
+
+/* ================= Componentes de Presentación ================= */
+
+// Componente que renderiza cada slide
+const Slide: FC<SlideProps> = React.memo(({ slide, isActive, isMobile }) => (
+  <div
+    className={`absolute inset-0 transition-all duration-1000 ease-in-out ${
+      isActive ? 'opacity-100 z-20 transform scale-100' : 'opacity-0 z-10 transform scale-105'
+    }`}
+    style={{ transitionProperty: 'opacity, transform', transitionTimingFunction: 'cubic-bezier(0.4, 0, 0.2, 1)' }}
+  >
+    <div className="absolute inset-0 bg-gradient-to-r from-black/70 to-black/40 z-10" />
+    <img
+      src={slide.image}
+      alt={slide.title}
+      className="h-full w-full object-cover object-center transform transition-transform duration-10000 ease-out scale-100 hover:scale-105"
+    />
+    <div className="absolute inset-0 z-20 flex items-center justify-center">
+      <div className="container mx-auto px-4">
+        <div className={`max-w-xl mx-auto ${isMobile ? 'text-center' : 'md:mx-0 md:text-left'}`}>
+          <span
+            className="inline-block text-cuenca-gold font-medium mb-2 tracking-wider opacity-0 animate-slide-in-up"
+            style={{ animationDelay: '0.2s', animationFillMode: 'forwards', animationDuration: '0.8s' }}
+          >
+            {slide.subtitle}
+          </span>
+          <h1
+            className="text-3xl md:text-5xl lg:text-6xl font-bold text-white mb-4 md:mb-6 opacity-0 animate-slide-in-up"
+            style={{ animationDelay: '0.4s', animationFillMode: 'forwards', animationDuration: '0.8s' }}
+          >
+            {slide.title}
+          </h1>
+          <p
+            className="text-base md:text-lg text-white/90 mb-6 md:mb-8 opacity-0 animate-slide-in-up"
+            style={{ animationDelay: '0.6s', animationFillMode: 'forwards', animationDuration: '0.8s' }}
+          >
+            {slide.description}
+          </p>
+          <div
+            className={`flex ${isMobile ? 'flex-col space-y-3' : 'md:flex-row md:space-x-4'} md:justify-start opacity-0 animate-slide-in-up`}
+            style={{ animationDelay: '0.8s', animationFillMode: 'forwards', animationDuration: '0.8s' }}
+          >
+            <a
+              href="#servicios"
+              className="bg-cuenca-blue hover:bg-opacity-90 text-white px-6 py-3 rounded-md transition-all duration-300 text-center transform hover:-translate-y-2 hover:shadow-lg"
+            >
+              Nuestros Servicios
+            </a>
+            <Link
+              to={`/servicios/${slide.serviceId}`}
+              className="bg-transparent hover:bg-white/10 text-white border border-white px-6 py-3 rounded-md transition-all duration-300 text-center transform hover:-translate-y-2 hover:shadow-lg"
+            >
+              Ver Detalles
+            </Link>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+));
+
+// Componente para los controles del slider
+const SliderControls: FC<SliderControlsProps> = ({ slides, currentSlide, setCurrentSlide, prevSlide, nextSlide }) => (
+  <div className="absolute bottom-8 z-30 w-full">
+    <div className="container mx-auto px-4 flex justify-between items-center">
+      <div className="flex space-x-2 overflow-x-auto md:overflow-visible pb-2 md:pb-0 max-w-[70%] md:max-w-none">
+        {slides.map((_, index) => (
+          <button
+            key={index}
+            onClick={() => setCurrentSlide(index)}
+            className={`h-2 rounded-full transition-all duration-300 ${
+              currentSlide === index ? 'w-8 bg-cuenca-gold animate-pulse-subtle' : 'w-2 bg-white/60'
+            }`}
+            aria-label={`Ir al slide ${index + 1}`}
+          />
+        ))}
+      </div>
+      <div className="flex space-x-2">
+        <button
+          onClick={prevSlide}
+          className="p-2 rounded-full bg-white/10 text-white hover:bg-white/20 transition-all duration-300 transform hover:scale-110"
+          aria-label="Slide anterior"
+        >
+          <ChevronLeft className="h-5 w-5" />
+        </button>
+        <button
+          onClick={nextSlide}
+          className="p-2 rounded-full bg-white/10 text-white hover:bg-white/20 transition-all duration-300 transform hover:scale-110"
+          aria-label="Siguiente slide"
+        >
+          <ChevronRight className="h-5 w-5" />
+        </button>
+      </div>
+    </div>
+  </div>
+);
+
+/* ================= Componente Principal ================= */
+
+const Hero: FC = () => {
+  const isMobile = useIsMobile();
+
+  // Transformamos y memorizamos los datos de los servicios
+  const slides: SlideData[] = useMemo(
+    () =>
+      servicesData.map((service: any) => ({
+        id: service.id,
+        title: service.title,
+        subtitle: service.id === 'auditoria-financiera'
+          ? 'Expertos en Auditoría'
+          : 'Servicios Especializados',
+        description: service.description,
+        image: service.image,
+        serviceId: service.id,
+      })),
+    []
+  );
+
+  const [currentSlide, setCurrentSlide] = useState<number>(0);
+  const [touchStart, setTouchStart] = useState<number>(0);
+  const [touchEnd, setTouchEnd] = useState<number>(0);
+
+  // Extraemos las URLs de las imágenes para el precargado
+  const imageUrls: string[] = useMemo(() => slides.map(slide => slide.image), [slides]);
+  const imagesLoaded = useImagePreloader(imageUrls);
+
+  // Handlers para la navegación de slides
+  const prevSlide = useCallback((): void => {
+    setCurrentSlide(prev => (prev === 0 ? slides.length - 1 : prev - 1));
+  }, [slides.length]);
+
+  const nextSlide = useCallback((): void => {
+    setCurrentSlide(prev => (prev === slides.length - 1 ? 0 : prev + 1));
+  }, [slides.length]);
+
+  // Intervalo automático para cambiar de slide cada 6 segundos
+  useInterval(nextSlide, 6000);
+
+  // Handlers para eventos táctiles (swipe)
+  const handleTouchStart = useCallback((e: React.TouchEvent<HTMLDivElement>): void => {
     setTouchStart(e.targetTouches[0].clientX);
-  };
-  
-  const handleTouchMove = (e: React.TouchEvent) => {
+  }, []);
+
+  const handleTouchMove = useCallback((e: React.TouchEvent<HTMLDivElement>): void => {
     setTouchEnd(e.targetTouches[0].clientX);
-  };
-  
-  const handleTouchEnd = () => {
+  }, []);
+
+  const handleTouchEnd = useCallback((): void => {
     if (touchStart - touchEnd > 50) {
       nextSlide();
-    }
-    
-    if (touchStart - touchEnd < -50) {
+    } else if (touchStart - touchEnd < -50) {
       prevSlide();
     }
-  };
-  
-  if (isLoading) {
+  }, [touchStart, touchEnd, nextSlide, prevSlide]);
+
+  if (!imagesLoaded) {
     return (
-      <div id="home" className="relative h-screen w-full flex items-center justify-center bg-gray-100">
+      <div id="home" className="relative h-screen md:h-screen w-full flex items-center justify-center bg-gray-100">
         <div className="animate-pulse flex flex-col items-center">
-          <div className="h-10 w-48 bg-gray-300 rounded mb-4"></div>
-          <div className="h-6 w-36 bg-gray-300 rounded mb-8"></div>
-          <div className="h-4 w-64 bg-gray-300 rounded"></div>
+          <div className="h-10 w-48 bg-gray-300 rounded mb-4" />
+          <div className="h-6 w-36 bg-gray-300 rounded mb-8" />
+          <div className="h-4 w-64 bg-gray-300 rounded" />
         </div>
       </div>
     );
   }
-  
+
   return (
-    <div 
-      id="home" 
-      className="relative h-screen w-full overflow-hidden"
+    <div
+      id="home"
+      className="relative h-[85vh] md:h-screen w-full overflow-hidden"
       onTouchStart={handleTouchStart}
       onTouchMove={handleTouchMove}
       onTouchEnd={handleTouchEnd}
     >
       {slides.map((slide, index) => (
-        <div 
-          key={slide.id}
-          className={`absolute inset-0 transition-opacity duration-1000 ${
-            index === currentSlide ? 'opacity-100 z-20' : 'opacity-0 z-10'
-          }`}
-        >
-          <div className="absolute inset-0 bg-gradient-to-r from-black/70 to-black/40 z-10"></div>
-          <img 
-            src={slide.image} 
-            alt={slide.title} 
-            className="h-full w-full object-cover object-center"
-          />
-          <div className="absolute inset-0 z-20 flex items-center justify-center">
-            <div className="container mx-auto px-4">
-              <div className="max-w-xl mx-auto md:mx-0 text-center md:text-left">
-                <span className="inline-block text-cuenca-gold font-medium mb-2 tracking-wider animate-slide-in">
-                  {slide.subtitle}
-                </span>
-                <h1 className="text-4xl md:text-5xl lg:text-6xl font-bold text-white mb-6 animate-fade-in">
-                  {slide.title}
-                </h1>
-                <p className="text-lg text-white/90 mb-8 animate-slide-up">
-                  {slide.description}
-                </p>
-                <div className="flex flex-col md:flex-row gap-4 justify-center md:justify-start animate-scale-up">
-                  <a 
-                    href="#servicios" 
-                    className="bg-cuenca-blue hover:bg-opacity-90 text-white px-6 py-3 rounded-md transition-all duration-300"
-                  >
-                    Nuestros Servicios
-                  </a>
-                  <a 
-                    href={`/servicios/${slide.serviceId}`}
-                    className="bg-transparent hover:bg-white/10 text-white border border-white px-6 py-3 rounded-md transition-all duration-300"
-                  >
-                    Ver Detalles
-                  </a>
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
+        <Slide key={slide.id} slide={slide} isActive={index === currentSlide} isMobile={isMobile} />
       ))}
-      
-      {/* Slider Controls */}
-      <div className="absolute bottom-8 z-30 w-full">
-        <div className="container mx-auto px-4 flex justify-between items-center">
-          <div className="flex space-x-2">
-            {slides.map((_, index) => (
-              <button
-                key={index}
-                onClick={() => setCurrentSlide(index)}
-                className={`h-2 rounded-full transition-all duration-300 ${
-                  currentSlide === index ? 'w-8 bg-cuenca-gold' : 'w-2 bg-white/60'
-                }`}
-                aria-label={`Go to slide ${index + 1}`}
-              />
-            ))}
-          </div>
-          
-          <div className="flex space-x-2">
-            <button
-              onClick={prevSlide}
-              className="p-2 rounded-full bg-white/10 text-white hover:bg-white/20 transition-all duration-300"
-              aria-label="Previous slide"
-            >
-              <ChevronLeft className="h-5 w-5" />
-            </button>
-            <button
-              onClick={nextSlide}
-              className="p-2 rounded-full bg-white/10 text-white hover:bg-white/20 transition-all duration-300"
-              aria-label="Next slide"
-            >
-              <ChevronRight className="h-5 w-5" />
-            </button>
-          </div>
-        </div>
-      </div>
+      <SliderControls
+        slides={slides}
+        currentSlide={currentSlide}
+        setCurrentSlide={setCurrentSlide}
+        prevSlide={prevSlide}
+        nextSlide={nextSlide}
+      />
     </div>
   );
 };
